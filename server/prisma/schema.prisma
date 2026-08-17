@@ -1,0 +1,30 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model Employee {
+  id        String   @id @default(cuid())
+  name      String
+  role      String?
+  color     String   @default("#6366f1")
+  createdAt DateTime @default(now())
+  shifts    Shift[]
+}
+
+model Shift {
+  id         String   @id @default(cuid())
+  employeeId String
+  employee   Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  startsAt   DateTime
+  endsAt     DateTime
+  notes      String?
+  createdAt  DateTime @default(now())
+
+  @@index([employeeId])
+  @@index([startsAt])
+}
