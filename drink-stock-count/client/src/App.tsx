@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { fetchInventory } from "./api/client";
 import { ALL_DRINKS, DISCONTINUING_DRINKS, MANAGED_DRINKS, MANAGED_MINIMUMS, TRACKED_DRINKS } from "./data/drinks";
+import { CLIENT_INVENTORY_SNAPSHOT, CLIENT_SNAPSHOT_LAST_UPDATED } from "./data/inventorySnapshot";
 import { afterOrders, managedStatus, projected } from "./lib/calculations";
 import { parsePapercutCsv } from "./lib/csvParser";
 import { formatHeaderDate } from "./lib/format";
@@ -21,9 +22,10 @@ function zeroMap(keys: string[]): Record<string, number> {
 
 export default function App() {
   const [inventory, setInventory] = useState<Record<string, InventoryItem>>({});
-  const [inventoryMeta, setInventoryMeta] = useState<{ source: "live" | "snapshot"; sheetLastUpdated: string | null } | null>(null);
+  const [inventoryMeta, setInventoryMeta] = useState<{ source: "live" | "snapshot" | "offline"; sheetLastUpdated: string | null } | null>(
+    null,
+  );
   const [inventoryLoading, setInventoryLoading] = useState(true);
-  const [inventoryError, setInventoryError] = useState<string | null>(null);
 
   const [goingOutByDrink, setGoingOutByDrink] = useState<Record<string, number>>(() => zeroMap(ALL_DRINKS));
   const [incomingByDrink, setIncomingByDrink] = useState<Record<string, number>>(() => zeroMap(EDITABLE_DRINKS));
@@ -41,7 +43,15 @@ export default function App() {
         setInventoryMeta({ source: res.source, sheetLastUpdated: res.sheetLastUpdated });
       })
       .catch((err: Error) => {
-        if (!cancelled) setInventoryError(err.message);
+        if (cancelled) return;
+        // No /api/inventory reachable at all (e.g. a static-only deploy with
+        // no backend) — fall back to a bundled snapshot rather than showing
+        // every drink at zero stock.
+        console.warn("Inventory API unavailable, using bundled snapshot:", err.message);
+        const map: Record<string, InventoryItem> = {};
+        for (const item of CLIENT_INVENTORY_SNAPSHOT) map[item.drink] = item;
+        setInventory(map);
+        setInventoryMeta({ source: "offline", sheetLastUpdated: CLIENT_SNAPSHOT_LAST_UPDATED });
       })
       .finally(() => {
         if (!cancelled) setInventoryLoading(false);
@@ -137,8 +147,14 @@ export default function App() {
             Showing last-known inventory snapshot{inventoryMeta.sheetLastUpdated ? ` (sheet last updated ${inventoryMeta.sheetLastUpdated})` : ""} — live sheet unavailable.
           </div>
         )}
-        {inventoryError && <div className="banner banner--error">Couldn&apos;t load inventory: {inventoryError}</div>}
-        {inventoryLoading && !inventoryError && <div className="banner banner--muted">Loading inventory…</div>}
+        {inventoryMeta?.source === "offline" && (
+          <div className="banner banner--muted">
+            No inventory API configured for this deployment — showing a bundled reference snapshot
+            {inventoryMeta.sheetLastUpdated ? ` (as of ${inventoryMeta.sheetLastUpdated})` : ""}. Current Stock and Expiry won&apos;t
+            reflect live changes.
+          </div>
+        )}
+        {inventoryLoading && <div className="banner banner--muted">Loading inventory…</div>}
 
         <KpiRow orderNow={orderNowCount} ok={okCount} tracking={trackedRows.length} discontinuing={discontinuingRows.length} />
         <UploadPanel onFile={handleFile} summary={csvSummary} />
